@@ -1,0 +1,9 @@
+project:
+  output-dir: _docs
+
+website:
+  title: "gzkeyboard"
+  site-url: "https://AI4Basics.github.io/gzkeyboard"
+  description: "A keyboard for typig in Ge'ez alphabets"
+  repo-branch: main
+  repo-url: "https://github.com/AI4Basics/gzkeyboard"
