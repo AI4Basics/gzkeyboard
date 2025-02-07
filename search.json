@@ -1,0 +1,52 @@
+[
+  {
+    "objectID": "index.html",
+    "href": "index.html",
+    "title": "gzkeyboard",
+    "section": "",
+    "text": "This file will become your README and also the index of your documentation.",
+    "crumbs": [
+      "gzkeyboard"
+    ]
+  },
+  {
+    "objectID": "index.html#developer-guide",
+    "href": "index.html#developer-guide",
+    "title": "gzkeyboard",
+    "section": "Developer Guide",
+    "text": "Developer Guide\nIf you are new to using nbdev here are some useful pointers to get you started.\n\nInstall gzkeyboard in Development mode\n# make sure gzkeyboard package is installed in development mode\n$ pip install -e .\n\n# make changes under nbs/ directory\n# ...\n\n# compile to have changes apply to gzkeyboard\n$ nbdev_prepare",
+    "crumbs": [
+      "gzkeyboard"
+    ]
+  },
+  {
+    "objectID": "index.html#usage",
+    "href": "index.html#usage",
+    "title": "gzkeyboard",
+    "section": "Usage",
+    "text": "Usage\n\nInstallation\nInstall latest from the GitHub repository:\n$ pip install git+https://github.com/AI4Basics/gzkeyboard.git\nor from conda\n$ conda install -c AI4Basics gzkeyboard\nor from pypi\n$ pip install gzkeyboard\n\n\nDocumentation\nDocumentation can be found hosted on this GitHub repository’s pages. Additionally you can find package manager specific guidelines on conda and pypi respectively.",
+    "crumbs": [
+      "gzkeyboard"
+    ]
+  },
+  {
+    "objectID": "index.html#how-to-use",
+    "href": "index.html#how-to-use",
+    "title": "gzkeyboard",
+    "section": "How to use",
+    "text": "How to use\nFill me in please! Don’t forget code examples:\n\n1+1\n\n2",
+    "crumbs": [
+      "gzkeyboard"
+    ]
+  },
+  {
+    "objectID": "gzkeyboard.html",
+    "href": "gzkeyboard.html",
+    "title": "Gzkeyboard",
+    "section": "",
+    "text": "source\n\nSystemInputHandler\n\n SystemInputHandler ()\n\nInitialize self. See help(type(self)) for accurate signature.\n\nsource\n\n\nGeezInputMethod\n\n GeezInputMethod ()\n\nInitialize self. See help(type(self)) for accurate signature.",
+    "crumbs": [
+      "Gzkeyboard"
+    ]
+  }
+]
