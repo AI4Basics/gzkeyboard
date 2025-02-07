@@ -14,17 +14,17 @@ class GeezInputMethod:
         # Basic mapping of Latin characters to Ge'ez
         self.mapping =         self.mapping = {
             # ሀ family (h)
-            'h': 'ሀ',   # 1st order (ä)
-            'hu': 'ሁ',  # 2nd order (u)
-            'hi': 'ሂ',  # 3rd order (i)
-            'ha': 'ሃ',  # 4th order (a)
-            'he': 'ሄ',  # 5th order (e)
+            'h'  : 'ሀ',   # 1st order (ä)
+            'hu' : 'ሁ',  # 2nd order (u)
+            'hi' : 'ሂ',  # 3rd order (i)
+            'ha' : 'ሃ',  # 4th order (a)
+            'he' : 'ሄ',  # 5th order (e)
             'h\'': 'ህ', # 6th order (ə)
-            'ho': 'ሆ',  # 7th order (o)
+            'ho' : 'ሆ',  # 7th order (o)
 
             # ለ family (l)
-            'l': 'ለ',   'lu': 'ሉ',   'li': 'ሊ',
-            'la': 'ላ',  'le': 'ሌ',   'l\'': 'ል',
+            'l' : 'ለ',  'lu' : 'ሉ',   'li': 'ሊ',
+            'la': 'ላ',  'le' : 'ሌ',   'l\'': 'ል',
             'lo': 'ሎ',  'lwa': 'ሏ',
 
             # ሐ family (hh)
