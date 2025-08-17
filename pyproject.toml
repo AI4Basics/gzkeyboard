@@ -1,3 +1,37 @@
 [build-system]
 requires = ["setuptools>=64.0"]
 build-backend = "setuptools.build_meta"
+
+[project]
+name="gzkeyboard"
+version = "0.0.1"
+description = "A keyboard for typing in Ge'ez alphabets (Tigrinya and Amharic)"
+authors = [
+    {name = "Yonatan Fisseha", email = "yonatan.negash@gmail.com"}
+]
+license = {file = "LICENSE"}
+readme = "README.md"
+requires-python=">=3.7"
+dependencies = [
+    "keyboard",
+    "nbdev",
+    "fastcore",
+    "jupyter",
+    "ipykernel"
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "black",
+    "ipywidgets",
+    "matplotlib",
+    "pandas"
+]
+
+[project.scripts]
+gzkeyboard = "gzkeyboard.gzkeyboard:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["gzkeyboard*"]
