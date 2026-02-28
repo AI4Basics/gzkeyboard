@@ -49,17 +49,21 @@ class VowelOrder(Enum):
 # %% ../nbs/00_core.ipynb 8
 @dataclass
 class CharacterFamily:
-    """Represents a family of Geez characters with vowel variations."""
-    base_key: str                    # Latin key (e.g., 'h', 's', 'l')
-    characters: List[str]           # 7 characters in vowel order
-    name: str                       # Human readable name
-    unicode_range: Tuple[int, int]  # Unicode start and end points
+    """Represents a family of Geez characters with vowel variations.
+    
+    Characters list must have exactly 7 entries (one per vowel order).
+    Entries may be None for families that lack certain forms (e.g., labiovelars).
+    """
+    base_key: str                           # Latin key (e.g., 'h', 's', 'l')
+    characters: List[Optional[str]]         # 7 characters in vowel order (None if form doesn't exist)
+    name: str                               # Human readable name
+    unicode_range: Tuple[int, int]          # Unicode start and end points
     
     def __post_init__(self):
         if len(self.characters) != 7:
-            raise ValueError(f"Character family must have exactly 7 characters, got {len(self.characters)}")
+            raise ValueError(f"Character family must have exactly 7 entries, got {len(self.characters)}")
     
-    def get_character(self, vowel_order: VowelOrder) -> str:
+    def get_character(self, vowel_order: VowelOrder) -> Optional[str]:
         """Get character for specific vowel order."""
         return self.characters[vowel_order.index]
     
@@ -75,55 +79,116 @@ class CharacterFamily:
         if vowel_order:
             return self.get_character(vowel_order)
         return None
+    
+    @property
+    def sadis(self) -> Optional[str]:
+        """Get the 6th order (sadis) form - the default output form."""
+        return self.characters[5]
+    
+    @property
+    def valid_characters(self) -> List[str]:
+        """Get list of non-None characters in this family."""
+        return [c for c in self.characters if c is not None]
 
 # %% ../nbs/00_core.ipynb 11
 class CharacterStore:
-    """Manages character families and provides lookup functionality."""
+    """Manages character families and provides lookup functionality.
+    
+    Supports Keyman-style parallel store operations:
+    - Forward lookup: base_key + vowel → character
+    - Reverse lookup: character → family + vowel order
+    - Parallel index: given a character, find same family at different vowel order
+    """
     
     def __init__(self):
         self.families: Dict[str, CharacterFamily] = {}
-        self._character_to_family: Dict[str, str] = {}  # Reverse lookup
+        self._character_to_family: Dict[str, str] = {}    # char → base_key
+        self._character_to_index: Dict[str, int] = {}     # char → vowel index
+        self._sadis_to_key: Dict[str, str] = {}           # sadis char → base_key
+        self.alternates: Dict[str, str] = {}              # sadis char → alternate sadis char
         self._initialize_default_families()
+        self._initialize_alternates()
     
     def _initialize_default_families(self):
         """Initialize with standard Geez character families."""
         default_families = [
-            # Basic consonants
-            CharacterFamily('h', ['ሀ', 'ሁ', 'ሂ', 'ሃ', 'ሄ', 'ህ', 'ሆ'], 'ሀ family (h)', (0x1200, 0x1206)),
-            CharacterFamily('l', ['ለ', 'ሉ', 'ሊ', 'ላ', 'ሌ', 'ል', 'ሎ'], 'ለ family (l)', (0x1208, 0x120E)),
-            CharacterFamily('hh', ['ሐ', 'ሑ', 'ሒ', 'ሓ', 'ሔ', 'ሕ', 'ሖ'], 'ሐ family (hh)', (0x1210, 0x1216)),
-            CharacterFamily('m', ['መ', 'ሙ', 'ሚ', 'ማ', 'ሜ', 'ም', 'ሞ'], 'መ family (m)', (0x1218, 0x121E)),
-            CharacterFamily('sz', ['ሠ', 'ሡ', 'ሢ', 'ሣ', 'ሤ', 'ሥ', 'ሦ'], 'ሠ family (sz)', (0x1220, 0x1226)),
-            CharacterFamily('r', ['ረ', 'ሩ', 'ሪ', 'ራ', 'ሬ', 'ር', 'ሮ'], 'ረ family (r)', (0x1228, 0x122E)),
-            CharacterFamily('s', ['ሰ', 'ሱ', 'ሲ', 'ሳ', 'ሴ', 'ስ', 'ሶ'], 'ሰ family (s)', (0x1230, 0x1236)),
-            CharacterFamily('sh', ['ሸ', 'ሹ', 'ሺ', 'ሻ', 'ሼ', 'ሽ', 'ሾ'], 'ሸ family (sh)', (0x1238, 0x123E)),
-            CharacterFamily('q', ['ቀ', 'ቁ', 'ቂ', 'ቃ', 'ቄ', 'ቅ', 'ቆ'], 'ቀ family (q)', (0x1240, 0x1246)),
-            CharacterFamily('b', ['በ', 'ቡ', 'ቢ', 'ባ', 'ቤ', 'ብ', 'ቦ'], 'በ family (b)', (0x1260, 0x1266)),
-            CharacterFamily('t', ['ተ', 'ቱ', 'ቲ', 'ታ', 'ቴ', 'ት', 'ቶ'], 'ተ family (t)', (0x1270, 0x1276)),
-            CharacterFamily('ch', ['ቸ', 'ቹ', 'ቺ', 'ቻ', 'ቼ', 'ች', 'ቾ'], 'ቸ family (ch)', (0x1278, 0x127E)),
-            CharacterFamily('n', ['ነ', 'ኑ', 'ኒ', 'ና', 'ኔ', 'ን', 'ኖ'], 'ነ family (n)', (0x1290, 0x1296)),
-            CharacterFamily('ny', ['ኘ', 'ኙ', 'ኚ', 'ኛ', 'ኜ', 'ኝ', 'ኞ'], 'ኘ family (ny)', (0x1298, 0x129E)),
-            CharacterFamily('k', ['ከ', 'ኩ', 'ኪ', 'ካ', 'ኬ', 'ክ', 'ኮ'], 'ከ family (k)', (0x12A8, 0x12AE)),
-            CharacterFamily('w', ['ወ', 'ዉ', 'ዊ', 'ዋ', 'ዌ', 'ው', 'ዎ'], 'ወ family (w)', (0x12C8, 0x12CE)),
-            CharacterFamily('z', ['ዘ', 'ዙ', 'ዚ', 'ዛ', 'ዜ', 'ዝ', 'ዞ'], 'ዘ family (z)', (0x12D8, 0x12DE)),
-            CharacterFamily('zh', ['ዠ', 'ዡ', 'ዢ', 'ዣ', 'ዤ', 'ዥ', 'ዦ'], 'ዠ family (zh)', (0x12E0, 0x12E6)),
-            CharacterFamily('y', ['የ', 'ዩ', 'ዪ', 'ያ', 'ዬ', 'ይ', 'ዮ'], 'የ family (y)', (0x12E8, 0x12EE)),
-            CharacterFamily('d', ['ደ', 'ዱ', 'ዲ', 'ዳ', 'ዴ', 'ድ', 'ዶ'], 'ደ family (d)', (0x12F0, 0x12F6)),
-            CharacterFamily('j', ['ጀ', 'ጁ', 'ጂ', 'ጃ', 'ጄ', 'ጅ', 'ጆ'], 'ጀ family (j)', (0x1300, 0x1306)),
-            CharacterFamily('g', ['ገ', 'ጉ', 'ጊ', 'ጋ', 'ጌ', 'ግ', 'ጎ'], 'ገ family (g)', (0x1308, 0x130E)),
-            CharacterFamily('f', ['ፈ', 'ፉ', 'ፊ', 'ፋ', 'ፌ', 'ፍ', 'ፎ'], 'ፈ family (f)', (0x1348, 0x134E)),
-            CharacterFamily('p', ['ፐ', 'ፑ', 'ፒ', 'ፓ', 'ፔ', 'ፕ', 'ፖ'], 'ፐ family (p)', (0x1350, 0x1356)),
+            # --- Standard consonants ---
+            CharacterFamily('h',   ['ሀ', 'ሁ', 'ሂ', 'ሃ', 'ሄ', 'ህ', 'ሆ'], 'ሀ family (h)',   (0x1200, 0x1206)),
+            CharacterFamily('l',   ['ለ', 'ሉ', 'ሊ', 'ላ', 'ሌ', 'ል', 'ሎ'], 'ለ family (l)',   (0x1208, 0x120E)),
+            CharacterFamily('hh',  ['ሐ', 'ሑ', 'ሒ', 'ሓ', 'ሔ', 'ሕ', 'ሖ'], 'ሐ family (hh)',  (0x1210, 0x1216)),
+            CharacterFamily('m',   ['መ', 'ሙ', 'ሚ', 'ማ', 'ሜ', 'ም', 'ሞ'], 'መ family (m)',   (0x1218, 0x121E)),
+            CharacterFamily('sz',  ['ሠ', 'ሡ', 'ሢ', 'ሣ', 'ሤ', 'ሥ', 'ሦ'], 'ሠ family (sz)',  (0x1220, 0x1226)),
+            CharacterFamily('r',   ['ረ', 'ሩ', 'ሪ', 'ራ', 'ሬ', 'ር', 'ሮ'], 'ረ family (r)',   (0x1228, 0x122E)),
+            CharacterFamily('s',   ['ሰ', 'ሱ', 'ሲ', 'ሳ', 'ሴ', 'ስ', 'ሶ'], 'ሰ family (s)',   (0x1230, 0x1236)),
+            CharacterFamily('sh',  ['ሸ', 'ሹ', 'ሺ', 'ሻ', 'ሼ', 'ሽ', 'ሾ'], 'ሸ family (sh)',  (0x1238, 0x123E)),
+            CharacterFamily('q',   ['ቀ', 'ቁ', 'ቂ', 'ቃ', 'ቄ', 'ቅ', 'ቆ'], 'ቀ family (q)',   (0x1240, 0x1246)),
+            CharacterFamily('qha', ['ቐ', 'ቑ', 'ቒ', 'ቓ', 'ቔ', 'ቕ', 'ቖ'], 'ቐ family (qha)', (0x1250, 0x1256)),
+            CharacterFamily('b',   ['በ', 'ቡ', 'ቢ', 'ባ', 'ቤ', 'ብ', 'ቦ'], 'በ family (b)',   (0x1260, 0x1266)),
+            CharacterFamily('v',   ['ቨ', 'ቩ', 'ቪ', 'ቫ', 'ቬ', 'ቭ', 'ቮ'], 'ቨ family (v)',   (0x1268, 0x126E)),
+            CharacterFamily('t',   ['ተ', 'ቱ', 'ቲ', 'ታ', 'ቴ', 'ት', 'ቶ'], 'ተ family (t)',   (0x1270, 0x1276)),
+            CharacterFamily('ch',  ['ቸ', 'ቹ', 'ቺ', 'ቻ', 'ቼ', 'ች', 'ቾ'], 'ቸ family (ch)',  (0x1278, 0x127E)),
+            CharacterFamily('x',   ['ኀ', 'ኁ', 'ኂ', 'ኃ', 'ኄ', 'ኅ', 'ኆ'], 'ኀ family (x)',   (0x1280, 0x1286)),
+            CharacterFamily('n',   ['ነ', 'ኑ', 'ኒ', 'ና', 'ኔ', 'ን', 'ኖ'], 'ነ family (n)',   (0x1290, 0x1296)),
+            CharacterFamily('ny',  ['ኘ', 'ኙ', 'ኚ', 'ኛ', 'ኜ', 'ኝ', 'ኞ'], 'ኘ family (ny)',  (0x1298, 0x129E)),
+            CharacterFamily('_v',  ['አ', 'ኡ', 'ኢ', 'ኣ', 'ኤ', 'እ', 'ኦ'], 'Vowel family',   (0x12A0, 0x12A6)),
+            CharacterFamily('k',   ['ከ', 'ኩ', 'ኪ', 'ካ', 'ኬ', 'ክ', 'ኮ'], 'ከ family (k)',   (0x12A8, 0x12AE)),
+            CharacterFamily('kh',  ['ኸ', 'ኹ', 'ኺ', 'ኻ', 'ኼ', 'ኽ', 'ኾ'], 'ኸ family (kh)',  (0x12B8, 0x12BE)),
+            CharacterFamily('w',   ['ወ', 'ዉ', 'ዊ', 'ዋ', 'ዌ', 'ው', 'ዎ'], 'ወ family (w)',   (0x12C8, 0x12CE)),
+            CharacterFamily('_a',  ['ዐ', 'ዑ', 'ዒ', 'ዓ', 'ዔ', 'ዕ', 'ዖ'], 'ዐ family (ayin)',(0x12D0, 0x12D6)),
+            CharacterFamily('z',   ['ዘ', 'ዙ', 'ዚ', 'ዛ', 'ዜ', 'ዝ', 'ዞ'], 'ዘ family (z)',   (0x12D8, 0x12DE)),
+            CharacterFamily('zh',  ['ዠ', 'ዡ', 'ዢ', 'ዣ', 'ዤ', 'ዥ', 'ዦ'], 'ዠ family (zh)',  (0x12E0, 0x12E6)),
+            CharacterFamily('y',   ['የ', 'ዩ', 'ዪ', 'ያ', 'ዬ', 'ይ', 'ዮ'], 'የ family (y)',   (0x12E8, 0x12EE)),
+            CharacterFamily('d',   ['ደ', 'ዱ', 'ዲ', 'ዳ', 'ዴ', 'ድ', 'ዶ'], 'ደ family (d)',   (0x12F0, 0x12F6)),
+            CharacterFamily('j',   ['ጀ', 'ጁ', 'ጂ', 'ጃ', 'ጄ', 'ጅ', 'ጆ'], 'ጀ family (j)',   (0x1300, 0x1306)),
+            CharacterFamily('g',   ['ገ', 'ጉ', 'ጊ', 'ጋ', 'ጌ', 'ግ', 'ጎ'], 'ገ family (g)',   (0x1308, 0x130E)),
+            CharacterFamily('T',   ['ጠ', 'ጡ', 'ጢ', 'ጣ', 'ጤ', 'ጥ', 'ጦ'], 'ጠ family (T)',   (0x1320, 0x1326)),
+            CharacterFamily('C',   ['ጨ', 'ጩ', 'ጪ', 'ጫ', 'ጬ', 'ጭ', 'ጮ'], 'ጨ family (C)',   (0x1328, 0x132E)),
+            CharacterFamily('P',   ['ጰ', 'ጱ', 'ጲ', 'ጳ', 'ጴ', 'ጵ', 'ጶ'], 'ጰ family (P)',   (0x1330, 0x1336)),
+            CharacterFamily('ts',  ['ጸ', 'ጹ', 'ጺ', 'ጻ', 'ጼ', 'ጽ', 'ጾ'], 'ጸ family (ts)',  (0x1338, 0x133E)),
+            CharacterFamily('ts2', ['ፀ', 'ፁ', 'ፂ', 'ፃ', 'ፄ', 'ፅ', 'ፆ'], 'ፀ family (ts2)', (0x1340, 0x1346)),
+            CharacterFamily('f',   ['ፈ', 'ፉ', 'ፊ', 'ፋ', 'ፌ', 'ፍ', 'ፎ'], 'ፈ family (f)',   (0x1348, 0x134E)),
+            CharacterFamily('p',   ['ፐ', 'ፑ', 'ፒ', 'ፓ', 'ፔ', 'ፕ', 'ፖ'], 'ፐ family (p)',   (0x1350, 0x1356)),
+            
+            # --- Labiovelar families (5 forms only) ---
+            CharacterFamily('hw',  ['ኈ', None, 'ኊ', 'ኋ', 'ኌ', 'ኍ', None], 'ሀ labiovelar (hw)', (0x1288, 0x128D)),
+            CharacterFamily('kw',  ['ኰ', None, 'ኲ', 'ኳ', 'ኴ', 'ኵ', None], 'ከ labiovelar (kw)', (0x12B0, 0x12B5)),
+            CharacterFamily('qw',  ['ቈ', None, 'ቊ', 'ቋ', 'ቌ', 'ቍ', None], 'ቀ labiovelar (qw)', (0x1248, 0x124D)),
+            CharacterFamily('gw',  ['ጐ', None, 'ጒ', 'ጓ', 'ጔ', 'ጕ', None], 'ገ labiovelar (gw)', (0x1310, 0x1315)),
         ]
         
         for family in default_families:
             self.add_family(family)
     
+    def _initialize_alternates(self):
+        """Initialize double-strike alternate mappings.
+        
+        When a user types the same consonant key twice, the character cycles
+        to an alternate form (e.g., ስ → ሥ on double 's').
+        """
+        self.alternates = {
+            'ስ': 'ሥ',   # s → sz (ሰ → ሠ)
+            'ሥ': 'ስ',   # sz → s (cycle back)
+            'ህ': 'ኅ',   # h → x (ሀ → ኀ)
+            'ኅ': 'ሕ',   # x → hh (ኀ → ሐ)
+            'ሕ': 'ህ',   # hh → h (cycle back)
+            'ጽ': 'ፅ',   # ts → ts2 (ጸ → ፀ)
+            'ፅ': 'ጽ',   # ts2 → ts (cycle back)
+            'አ': 'ዓ',   # vowel-a → ayin-a
+            'ዓ': 'ዐ',   # ayin-a → ayin-geez
+            'ዐ': 'አ',   # ayin-geez → vowel-a (cycle back)
+        }
+    
     def add_family(self, family: CharacterFamily):
         """Add a character family to the store."""
         self.families[family.base_key] = family
-        # Build reverse lookup
-        for char in family.characters:
-            self._character_to_family[char] = family.base_key
+        # Build reverse lookups
+        for i, char in enumerate(family.characters):
+            if char is not None:
+                self._character_to_family[char] = family.base_key
+                self._character_to_index[char] = i
+        # Build sadis-to-key lookup
+        if family.sadis is not None:
+            self._sadis_to_key[family.sadis] = family.base_key
     
     def get_family(self, base_key: str) -> Optional[CharacterFamily]:
         """Get character family by base key."""
@@ -137,7 +202,7 @@ class CharacterStore:
         return None
     
     def find_family_for_character(self, character: str) -> Optional[str]:
-        """Find which family a character belongs to."""
+        """Find which family a character belongs to (returns base_key)."""
         return self._character_to_family.get(character)
     
     def get_all_base_keys(self) -> List[str]:
@@ -147,6 +212,61 @@ class CharacterStore:
     def has_family(self, base_key: str) -> bool:
         """Check if a base key has a character family."""
         return base_key in self.families
+    
+    # --- Keyman-style parallel store methods ---
+    
+    def get_vowel_order_of(self, char: str) -> Optional[int]:
+        """Given a Ge'ez char, return its vowel order index (0-6).
+        
+        This is the Python equivalent of Keyman's any() — it finds the
+        position of a character within its family's store.
+        """
+        return self._character_to_index.get(char)
+    
+    def get_same_family_at_order(self, char: str, target_order: int) -> Optional[str]:
+        """Given a Ge'ez char, return the character in the same family at a different vowel order.
+        
+        This is the Python equivalent of Keyman's index(store, N) — it looks up
+        a character in a parallel store at the same position.
+        
+        Args:
+            char: A Ge'ez character
+            target_order: The target vowel order index (0-6)
+            
+        Returns:
+            The character at the target order, or None if it doesn't exist.
+        """
+        base_key = self._character_to_family.get(char)
+        if base_key is None:
+            return None
+        family = self.families[base_key]
+        return family.get_character_by_index(target_order)
+    
+    def get_sadis_for_key(self, base_key: str) -> Optional[str]:
+        """Get the 6th order (sadis) character for a base key.
+        
+        This is the default output when a consonant key is pressed.
+        """
+        family = self.get_family(base_key)
+        if family:
+            return family.sadis
+        return None
+    
+    def get_key_for_sadis(self, sadis_char: str) -> Optional[str]:
+        """Reverse lookup: given a sadis character, get its base key."""
+        return self._sadis_to_key.get(sadis_char)
+    
+    def get_alternate(self, char: str) -> Optional[str]:
+        """Get the double-strike alternate for a character.
+        
+        Used when the same consonant key is pressed twice to cycle
+        through alternate character forms.
+        """
+        return self.alternates.get(char)
+    
+    def is_geez_char(self, char: str) -> bool:
+        """Check if a character is a known Ge'ez character."""
+        return char in self._character_to_family
 
 # %% ../nbs/00_core.ipynb 14
 def explore_family(store: CharacterStore, base_key: str):

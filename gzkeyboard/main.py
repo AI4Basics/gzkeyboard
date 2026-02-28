@@ -6,19 +6,22 @@
 __all__ = ['main']
 
 # %% ../nbs/04_main.ipynb 2
+__all__ = ['main']
+
 import argparse
 import sys
 import time
 from pathlib import Path
 
 from .core import CharacterStore
-from .composition import SyllableComposer, CompositionStrategy, test_composition_interactive
-from .system import SystemInputHandler, InputMode, KeyboardConfig
+from .composition import ContextEngine, simulate_typing
+from .system import SystemInputHandler, InputMode, KeyboardConfig, start_keyboard, stop_keyboard
 
+# %% ../nbs/04_main.ipynb 3
 def main():
-    """Main command-line entry point."""
+    """Main command-line entry point for GzKeyboard."""
     parser = argparse.ArgumentParser(
-        description="GzKeyboard v2.0 - Advanced Geez keyboard for Tigrinya and Amharic"
+        description="GzKeyboard - Context-driven Ge'ez keyboard for Tigrinya and Amharic"
     )
     
     parser.add_argument(
@@ -34,66 +37,41 @@ def main():
         help="Run interactive composition tests"
     )
     
+    parser.add_argument(
+        "--debug",
+        action="store_true",
+        help="Enable debug mode with detailed logging"
+    )
+    
     args = parser.parse_args()
     
     if args.test:
-        print("🧪 GzKeyboard Interactive Tests")
+        print("GzKeyboard Interactive Tests (Context-Driven Engine)")
+        print("=" * 55)
         
-        # Create test setup
-        character_store = CharacterStore()
-        composer = SyllableComposer(character_store, strategy=CompositionStrategy.ADAPTIVE)
+        store = CharacterStore()
+        engine = ContextEngine(store)
         
-        # Test common words
-        test_words = ['hello', 'selam', 'geez']
-        
+        test_words = ['selam', 'halo', 'geez', 'shalom', "g'iz"]
         for word in test_words:
-            output = test_composition_interactive(composer, word, show_details=False)
-            print(f"   '{word}' → '{output}'")
+            simulate_typing(engine, word)
         
-        print("\n✅ Tests completed!")
+        print("Tests completed!")
         return
     
     # Start the actual keyboard system
-    print(f"🎹 Starting GzKeyboard v2.0 in {args.mode} mode...")
+    print(f"Starting GzKeyboard in {args.mode} mode...")
     
-    try:
-        # Create input mode enum  
-        input_mode = InputMode(args.mode)
-        
-        # Create system handler with basic config
-        config = KeyboardConfig(
-            default_mode=input_mode,
-            debug_mode=False
-        )
-        
-        handler = SystemInputHandler(config)
-        
-        # Try to setup keyboard hooks
-        success = handler.setup_keyboard_hook()
-        
-        if success:
-            print(f"✅ Keyboard hooks active in {args.mode} mode")
-            print(f"⌨️  Hotkeys:")
-            print(f"   {config.toggle_hotkey}: Toggle on/off")
-            print(f"   {config.tigrinya_hotkey}: Tigrinya mode")
-            print(f"   {config.amharic_hotkey}: Amharic mode")
-            print(f"   {config.latin_hotkey}: Latin mode")
-            print(f"\n✨ Start typing! Press Ctrl+C to exit.")
-            
-            # Keep running
-            try:
-                while True:
-                    time.sleep(0.1)
-            except KeyboardInterrupt:
-                print("\n👋 GzKeyboard stopped. Goodbye!")
-                handler.cleanup()
-        else:
-            print("❌ Failed to start keyboard hooks.")
-            print("💡 Try running with --test to verify the composition engine works")
+    handler = start_keyboard(args.mode, args.debug)
     
-    except Exception as e:
-        print(f"❌ Error: {e}")
-        print("💡 Try running with --test to test the composition engine")
-
-if __name__ == "__main__":
-    main()
+    if handler.keyboard_hook_active:
+        try:
+            print("Start typing! Press Ctrl+C to exit.")
+            while True:
+                time.sleep(0.1)
+        except KeyboardInterrupt:
+            print("\nGzKeyboard stopped. Goodbye!")
+            stop_keyboard(handler)
+    else:
+        print("Failed to start keyboard hooks.")
+        print("Try running with --test to verify the composition engine works")

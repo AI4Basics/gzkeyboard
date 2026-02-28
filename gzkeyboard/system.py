@@ -17,7 +17,7 @@ import time
 from pathlib import Path
 
 from .core import CharacterStore
-from .composition import SyllableComposer, CompositionStrategy, CompositionResult
+from .composition import ContextEngine, CompositionAction
 
 # %% ../nbs/02_system_integration.ipynb 5
 class InputMode(Enum):
@@ -30,9 +30,6 @@ class InputMode(Enum):
 class KeyboardConfig:
     """Configuration for the Geez keyboard input method."""
     default_mode: InputMode = InputMode.TIGRINYA
-    composition_strategy: CompositionStrategy = CompositionStrategy.ADAPTIVE
-    base_timeout: float = 0.5
-    custom_mappings_path: Optional[str] = None
     
     # Hotkey configuration
     toggle_hotkey: str = "ctrl+space"
@@ -137,7 +134,11 @@ class StatusIndicator:
 
 # %% ../nbs/02_system_integration.ipynb 11
 class SystemInputHandler:
-    """Handles system-wide keyboard input for the Geez keyboard."""
+    """Handles system-wide keyboard input for the Geez keyboard.
+    
+    Uses the context-driven ContextEngine for immediate character output
+    with backspace+replace behavior.
+    """
     
     def __init__(self, config: Optional[KeyboardConfig] = None):
         """Initialize the input handler with configuration."""
@@ -145,11 +146,7 @@ class SystemInputHandler:
         
         # Initialize components
         self.character_store = CharacterStore()
-        self.composer = SyllableComposer(
-            self.character_store,
-            strategy=self.config.composition_strategy,
-            timeout=self.config.base_timeout
-        )
+        self.engine = ContextEngine(self.character_store)
         self.status = StatusIndicator(self.config)
         self.hotkey_manager = HotkeyManager(self.config)
         
@@ -167,33 +164,28 @@ class SystemInputHandler:
         self.hotkey_manager.register_callback('switch_to_tigrinya', lambda: self.switch_mode(InputMode.TIGRINYA))
         self.hotkey_manager.register_callback('switch_to_amharic', lambda: self.switch_mode(InputMode.AMHARIC))
         self.hotkey_manager.register_callback('switch_to_latin', lambda: self.switch_mode(InputMode.LATIN))
-        self.hotkey_manager.register_callback('cancel_buffer', self.cancel_buffer)
+        self.hotkey_manager.register_callback('cancel_buffer', self.reset_engine)
     
     def switch_mode(self, mode: InputMode):
         """Switch to a different input mode."""
         self.current_mode = mode
         self.status.update_mode(mode)
-        
-        # Reset composer when switching modes
-        self.composer.reset()
+        self.engine.reset()
     
     def toggle_active(self):
         """Toggle the keyboard active/inactive state."""
         self.active = not self.active
         self.status.toggle_active()
-        
-        # Reset composer when toggling
         if self.active:
-            self.composer.reset()
+            self.engine.reset()
     
-    def cancel_buffer(self):
-        """Cancel current input buffer."""
-        if self.composer.buffer:
-            self.composer.reset()
-            self.status.show_status("Buffer cleared")
+    def reset_engine(self):
+        """Reset the composition engine context."""
+        self.engine.reset()
+        self.status.show_status("Context cleared")
     
     def setup_keyboard_hook(self):
-        """Set up system-wide keyboard hook."""
+        """Set up system-wide keyboard hook with suppress=True for intercept+replace."""
         try:
             import keyboard
             
@@ -207,30 +199,31 @@ class SystemInputHandler:
                 if not self.active or self.current_mode == InputMode.LATIN:
                     return True
                 
-                # Only process single alphabetic characters
-                if len(event.name) == 1 and event.name.isalpha():
-                    result = self.composer.process_input(event.name)
-                    
-                    # Show debug info if enabled
-                    self.status.show_buffer_state(self.composer.buffer, result.suggestions)
-                    
-                    # Handle the result
-                    if result.output:
-                        # Output the Geez character
-                        keyboard.write(result.output)
-                        
-                        # Suppress the original keystroke
-                        return False
-                    
-                    elif result.consume_input > 0:
-                        # Suppress keystroke but no output (waiting for more input)
-                        return False
+                key = event.name
                 
-                # Let everything else through
-                return True
+                # Process composable keys through context engine
+                if len(key) == 1 and (key.isalpha() or key in "':.;,?"):
+                    action = self.engine.process_key(key)
+                    
+                    if self.config.debug_mode:
+                        print(f"[DEBUG] key='{key}' -> bs={action.backspaces}, out='{action.output}', ctx='{action.new_context}'")
+                    
+                    # Execute the action
+                    if action.backspaces > 0:
+                        for _ in range(action.backspaces):
+                            keyboard.send('backspace')
+                    
+                    if action.output:
+                        keyboard.write(action.output)
+                    
+                    return False  # Suppress original keystroke
+                
+                # Non-composable key resets context
+                self.engine.reset()
+                return True  # Let it through
             
-            # Set up the hook
-            keyboard.hook(on_key_event, suppress=False)
+            # suppress=True to intercept keys before they reach the application
+            keyboard.hook(on_key_event, suppress=True)
             self.keyboard_hook_active = True
             
             # Set up hotkeys
@@ -256,71 +249,48 @@ class SystemInputHandler:
     
     def get_status(self) -> dict:
         """Get current status information."""
-        composer_stats = self.composer.get_stats()
-        
         return {
             'active': self.active,
             'current_mode': self.current_mode.value,
             'keyboard_hook_active': self.keyboard_hook_active,
-            'current_buffer': self.composer.buffer,
-            'composition_strategy': self.config.composition_strategy.value,
+            'current_context': self.engine.context,
             'registered_hotkeys': len(self.hotkey_manager.registered_hotkeys),
-            'composer_stats': composer_stats
         }
 
 # %% ../nbs/02_system_integration.ipynb 13
 def create_default_config(mode: str = "tigrinya", 
-                         strategy: str = "adaptive",
                          debug: bool = False) -> KeyboardConfig:
     """Create a default configuration."""
-    # Convert string parameters to enums
     try:
         input_mode = InputMode(mode.lower())
     except ValueError:
         print(f"Invalid mode: {mode}. Using Tigrinya.")
         input_mode = InputMode.TIGRINYA
     
-    try:
-        comp_strategy = CompositionStrategy(strategy.lower())
-    except ValueError:
-        print(f"Invalid strategy: {strategy}. Using Adaptive.")
-        comp_strategy = CompositionStrategy.ADAPTIVE
-    
     return KeyboardConfig(
         default_mode=input_mode,
-        composition_strategy=comp_strategy,
         debug_mode=debug
     )
 
 def start_keyboard(mode: str = "tigrinya", 
-                  strategy: str = "adaptive",
                   debug: bool = False) -> SystemInputHandler:
     """Start the Geez keyboard with specified configuration."""
-    
-    # Create configuration
-    config = create_default_config(mode, strategy, debug)
-    
-    # Create and setup input handler
+    config = create_default_config(mode, debug)
     handler = SystemInputHandler(config)
     
-    # Setup keyboard hooks
     success = handler.setup_keyboard_hook()
     
     if success:
         handler.status.show_status(
-            f"GzKeyboard started in {mode} mode with {strategy} strategy"
+            f"GzKeyboard started in {mode} mode (context-driven engine)"
         )
-        
-        if debug:
-            status = handler.get_status()
-            print(f"Status: {status}")
         
         print("\nHotkeys:")
         print(f"  {config.toggle_hotkey}: Toggle keyboard on/off")
         print(f"  {config.tigrinya_hotkey}: Switch to Tigrinya")
         print(f"  {config.amharic_hotkey}: Switch to Amharic")
         print(f"  {config.latin_hotkey}: Switch to Latin")
-        print(f"  {config.cancel_hotkey}: Clear buffer")
+        print(f"  {config.cancel_hotkey}: Reset context")
         print("\nPress Ctrl+C to exit")
     else:
         print("Failed to start keyboard. Check dependencies and permissions.")
@@ -336,13 +306,12 @@ def stop_keyboard(handler: SystemInputHandler):
 def main():
     """Command-line entry point for the Geez Keyboard."""
     parser = argparse.ArgumentParser(
-        description="GzKeyboard - Advanced Geez keyboard for typing in Tigrinya and Amharic",
+        description="GzKeyboard - Context-driven Geez keyboard for Tigrinya and Amharic",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
   python -m gzkeyboard.system                    # Start with default settings
   python -m gzkeyboard.system --mode amharic     # Start in Amharic mode
-  python -m gzkeyboard.system --strategy eager   # Use eager composition
   python -m gzkeyboard.system --test             # Run interactive tests
   python -m gzkeyboard.system --debug            # Enable debug mode
 """
@@ -353,13 +322,6 @@ Examples:
         choices=["tigrinya", "amharic", "latin"],
         default="tigrinya",
         help="Input mode (default: tigrinya)"
-    )
-    
-    parser.add_argument(
-        "--strategy",
-        choices=["eager", "lazy", "predictive", "adaptive"],
-        default="adaptive",
-        help="Composition strategy (default: adaptive)"
     )
     
     parser.add_argument(
@@ -377,39 +339,26 @@ Examples:
     args = parser.parse_args()
     
     if args.test:
-        # Run interactive tests
-        from gzkeyboard.composition import test_composition_interactive, compare_strategies
+        from gzkeyboard.composition import simulate_typing
         
-        print("GzKeyboard Interactive Tests")
-        print("============================\n")
+        print("GzKeyboard Interactive Tests (Context-Driven Engine)")
+        print("=" * 55)
         
-        # Create test setup
-        config = create_default_config(args.mode, args.strategy, args.debug)
-        character_store = CharacterStore()
-        composer = SyllableComposer(
-            character_store,
-            strategy=config.composition_strategy,
-            timeout=config.base_timeout
-        )
+        store = CharacterStore()
+        engine = ContextEngine(store)
         
-        # Test common words
-        test_words = ['hello', 'selam', 'geez', 'tigrinya', 'amharic']
-        
+        test_words = ['selam', 'halo', 'geez', 'shalom']
         for word in test_words:
-            output = test_composition_interactive(composer, word)
+            simulate_typing(engine, word)
         
-        # Compare strategies
-        compare_strategies('hello')
-        
-        print("\nTests completed!")
+        print("Tests completed!")
         return
     
     # Start the keyboard
-    handler = start_keyboard(args.mode, args.strategy, args.debug)
+    handler = start_keyboard(args.mode, args.debug)
     
     if handler.keyboard_hook_active:
         try:
-            # Keep the application running
             while True:
                 time.sleep(0.1)
         except KeyboardInterrupt:

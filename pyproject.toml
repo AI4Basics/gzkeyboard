@@ -30,7 +30,7 @@ dev = [
 ]
 
 [project.scripts]
-gzkeyboard = "gzkeyboard.gzkeyboard:main"
+gzkeyboard = "gzkeyboard.main:main"
 
 [tool.setuptools.packages.find]
 where = ["."]
