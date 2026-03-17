@@ -15,20 +15,26 @@ from pathlib import Path
 
 # %% ../nbs/00_core.ipynb 5
 class VowelOrder(Enum):
-    """Traditional Geez vowel order system."""
-    GEEZ = (0, "ግዕዝ", "", "ä")      # Base form
-    KAEB = (1, "ካዕብ", "u", "u")     # Second order
-    SALIS = (2, "ሣልስ", "i", "i")    # Third order  
-    RABE = (3, "ራብዕ", "a", "a")     # Fourth order
-    HAMS = (4, "ኃምስ", "e", "e")     # Fifth order
-    SADES = (5, "ሳድስ", "'", "ə")    # Sixth order
-    SABE = (6, "ሳብዕ", "o", "o")     # Seventh order
+    """Traditional Geez vowel order system.
+    
+    Latin key mapping follows Keyman/GFF convention:
+    - 'e' → 1st order (ግዕዝ) — the most common form
+    - 5th order (ኃምስ) has no direct key — accessed via 'ie' shortcut (3rd + 'e')
+    - 6th order (ሳድስ) is the default bare consonant output
+    """
+    GEEZ  = (0, "ግዕዝ", "e", "ä")      # Base form — typed with 'e'
+    KAEB  = (1, "ካዕብ", "u", "u")      # Second order
+    SALIS = (2, "ሣልስ", "i", "i")      # Third order  
+    RABE  = (3, "ራብዕ", "a", "a")      # Fourth order
+    HAMS  = (4, "ኃምስ",  "", "e")      # Fifth order — accessed via 'ie' (FifthOrderRule)
+    SADES = (5, "ሳድስ",  "", "ə")      # Sixth order — default (bare consonant)
+    SABE  = (6, "ሳብዕ", "o", "o")      # Seventh order
     
     def __init__(self, index, geez_name, latin_key, ipa):
-        self.index = index
+        self.index     = index
         self.geez_name = geez_name
         self.latin_key = latin_key
-        self.ipa = ipa
+        self.ipa       = ipa
     
     @classmethod
     def from_latin_key(cls, key: str) -> Optional['VowelOrder']:
@@ -49,14 +55,15 @@ class VowelOrder(Enum):
 # %% ../nbs/00_core.ipynb 8
 @dataclass
 class CharacterFamily:
-    """Represents a family of Geez characters with vowel variations.
+    """
+    Represents a family of Geez characters with vowel variations.
     
     Characters list must have exactly 7 entries (one per vowel order).
     Entries may be None for families that lack certain forms (e.g., labiovelars).
     """
-    base_key: str                           # Latin key (e.g., 'h', 's', 'l')
-    characters: List[Optional[str]]         # 7 characters in vowel order (None if form doesn't exist)
-    name: str                               # Human readable name
+    base_key     : str                      # Latin key (e.g., 'h', 's', 'l')
+    characters   : List[Optional[str]]      # 7 characters in vowel order (None if form doesn't exist)
+    name         : str                      # Human readable name
     unicode_range: Tuple[int, int]          # Unicode start and end points
     
     def __post_init__(self):
@@ -101,11 +108,11 @@ class CharacterStore:
     """
     
     def __init__(self):
-        self.families: Dict[str, CharacterFamily] = {}
-        self._character_to_family: Dict[str, str] = {}    # char → base_key
-        self._character_to_index: Dict[str, int] = {}     # char → vowel index
-        self._sadis_to_key: Dict[str, str] = {}           # sadis char → base_key
-        self.alternates: Dict[str, str] = {}              # sadis char → alternate sadis char
+        self.families             : Dict[str, CharacterFamily] = {}
+        self._character_to_family : Dict[str, str] = {}    # char → base_key
+        self._character_to_index  : Dict[str, int] = {}     # char → vowel index
+        self._sadis_to_key        : Dict[str, str] = {}           # sadis char → base_key
+        self.alternates           : Dict[str, str] = {}              # sadis char → alternate sadis char
         self._initialize_default_families()
         self._initialize_alternates()
     
@@ -117,19 +124,19 @@ class CharacterStore:
             CharacterFamily('l',   ['ለ', 'ሉ', 'ሊ', 'ላ', 'ሌ', 'ል', 'ሎ'], 'ለ family (l)',   (0x1208, 0x120E)),
             CharacterFamily('hh',  ['ሐ', 'ሑ', 'ሒ', 'ሓ', 'ሔ', 'ሕ', 'ሖ'], 'ሐ family (hh)',  (0x1210, 0x1216)),
             CharacterFamily('m',   ['መ', 'ሙ', 'ሚ', 'ማ', 'ሜ', 'ም', 'ሞ'], 'መ family (m)',   (0x1218, 0x121E)),
-            CharacterFamily('sz',  ['ሠ', 'ሡ', 'ሢ', 'ሣ', 'ሤ', 'ሥ', 'ሦ'], 'ሠ family (sz)',  (0x1220, 0x1226)),
+            CharacterFamily('ss',  ['ሠ', 'ሡ', 'ሢ', 'ሣ', 'ሤ', 'ሥ', 'ሦ'], 'ሠ family (sz)',  (0x1220, 0x1226)),
             CharacterFamily('r',   ['ረ', 'ሩ', 'ሪ', 'ራ', 'ሬ', 'ር', 'ሮ'], 'ረ family (r)',   (0x1228, 0x122E)),
             CharacterFamily('s',   ['ሰ', 'ሱ', 'ሲ', 'ሳ', 'ሴ', 'ስ', 'ሶ'], 'ሰ family (s)',   (0x1230, 0x1236)),
             CharacterFamily('sh',  ['ሸ', 'ሹ', 'ሺ', 'ሻ', 'ሼ', 'ሽ', 'ሾ'], 'ሸ family (sh)',  (0x1238, 0x123E)),
             CharacterFamily('q',   ['ቀ', 'ቁ', 'ቂ', 'ቃ', 'ቄ', 'ቅ', 'ቆ'], 'ቀ family (q)',   (0x1240, 0x1246)),
-            CharacterFamily('qha', ['ቐ', 'ቑ', 'ቒ', 'ቓ', 'ቔ', 'ቕ', 'ቖ'], 'ቐ family (qha)', (0x1250, 0x1256)),
+            CharacterFamily('qh',   ['ቐ', 'ቑ', 'ቒ', 'ቓ', 'ቔ', 'ቕ', 'ቖ'], 'ቐ family (qh)', (0x1250, 0x1256)),
             CharacterFamily('b',   ['በ', 'ቡ', 'ቢ', 'ባ', 'ቤ', 'ብ', 'ቦ'], 'በ family (b)',   (0x1260, 0x1266)),
             CharacterFamily('v',   ['ቨ', 'ቩ', 'ቪ', 'ቫ', 'ቬ', 'ቭ', 'ቮ'], 'ቨ family (v)',   (0x1268, 0x126E)),
             CharacterFamily('t',   ['ተ', 'ቱ', 'ቲ', 'ታ', 'ቴ', 'ት', 'ቶ'], 'ተ family (t)',   (0x1270, 0x1276)),
             CharacterFamily('ch',  ['ቸ', 'ቹ', 'ቺ', 'ቻ', 'ቼ', 'ች', 'ቾ'], 'ቸ family (ch)',  (0x1278, 0x127E)),
-            CharacterFamily('x',   ['ኀ', 'ኁ', 'ኂ', 'ኃ', 'ኄ', 'ኅ', 'ኆ'], 'ኀ family (x)',   (0x1280, 0x1286)),
+            CharacterFamily('x',   ['ኀ', 'ኁ', 'ኂ', 'ኃ', 'ኄ', 'ኅ', 'ኆ'], 'ኀ family (x)',   (0x1280, 0x1286)), #ዮናታን***
             CharacterFamily('n',   ['ነ', 'ኑ', 'ኒ', 'ና', 'ኔ', 'ን', 'ኖ'], 'ነ family (n)',   (0x1290, 0x1296)),
-            CharacterFamily('ny',  ['ኘ', 'ኙ', 'ኚ', 'ኛ', 'ኜ', 'ኝ', 'ኞ'], 'ኘ family (ny)',  (0x1298, 0x129E)),
+            CharacterFamily('gn',  ['ኘ', 'ኙ', 'ኚ', 'ኛ', 'ኜ', 'ኝ', 'ኞ'], 'ኘ family (gn)',  (0x1298, 0x129E)),
             CharacterFamily('_v',  ['አ', 'ኡ', 'ኢ', 'ኣ', 'ኤ', 'እ', 'ኦ'], 'Vowel family',   (0x12A0, 0x12A6)),
             CharacterFamily('k',   ['ከ', 'ኩ', 'ኪ', 'ካ', 'ኬ', 'ክ', 'ኮ'], 'ከ family (k)',   (0x12A8, 0x12AE)),
             CharacterFamily('kh',  ['ኸ', 'ኹ', 'ኺ', 'ኻ', 'ኼ', 'ኽ', 'ኾ'], 'ኸ family (kh)',  (0x12B8, 0x12BE)),

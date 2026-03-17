@@ -4,8 +4,8 @@
 
 # %% auto 0
 __all__ = ['CompositionAction', 'CompositionRule', 'SeparatorRule', 'DoubleStrikeRule', 'LabiovelarRule', 'FifthOrderRule',
-           'VowelRule', 'DigramSecondKeyRule', 'ConsonantRule', 'PunctuationRule', 'LoneVowelRule', 'ContextEngine',
-           'simulate_typing']
+           'VowelRule', 'DigramSecondKeyRule', 'PendingConsonantRule', 'ConsonantRule', 'PunctuationRule',
+           'LoneVowelRule', 'ContextEngine', 'simulate_typing']
 
 # %% ../nbs/01_composition.ipynb 3
 from typing import Dict, List, Optional, Tuple, Set
@@ -118,7 +118,7 @@ class LabiovelarRule(CompositionRule):
     LABIOVELAR_MAP = {
         'h': 'hw', 'x': 'hw',
         'k': 'kw', 'kh': 'kw',
-        'q': 'qw', 'qha': 'qw',
+        'q': 'qw', 'qh': 'qw',
         'g': 'gw',
     }
     
@@ -209,72 +209,100 @@ class VowelRule(CompositionRule):
 
 # %% ../nbs/01_composition.ipynb 13
 class DigramSecondKeyRule(CompositionRule):
-    """Digram composition: e.g., ስ + 'h' -> ሽ (s + h -> sh family).
-    
-    When the context is a sadis character and the next key forms a digram
-    (two-letter consonant), replace with the digram family's sadis.
+    """Digram composition: two-key consonants -> single Ge'ez character.
+
+    Two cases:
+    1. Geez sadis context: ስ + 'h' -> ሽ  (s already output, replace it)
+    2. Latin pending context: 'c' + 'h' -> ች  (c produced no output, no backspace needed)
+
+    Priority is set above DoubleStrikeRule so that 'hh' maps to ሐ (hh family)
+    rather than cycling to the DoubleStrike alternate ኅ.
     """
-    
-    # Maps (context_sadis_char_family, second_key) -> digram_base_key
-    # We store by family base_key for clarity
+
     DIGRAM_MAP = {
-        ('s', 'h'):  'sh',   # s + h -> sh
-        ('z', 'h'):  'zh',   # z + h -> zh
-        ('t', 's'):  'ts',   # t + s -> ts
-        ('n', 'y'):  'ny',   # n + y -> ny
+        ('s', 'h'):  'sh',
+        ('z', 'h'):  'zh',
+        ('t', 's'):  'ts',
+        ('g', 'n'):  'gn',
+        ('c', 'h'):  'ch',   # 'c' is pending (no output), 'h' completes it
+        ('h', 'h'):  'hh',   # hh family (ሐ)
+        ('q', 'h'):  'qh',   # qh family (ቐ)
     }
-    
+
     @property
-    def priority(self) -> int: return 50
-    
+    def priority(self) -> int: return 95  # above DoubleStrikeRule(90) so hh beats the alternate cycle
+
     def matches(self, context: str, key: str, store: CharacterStore) -> bool:
-        if not context or not store.is_geez_char(context):
+        if not context:
             return False
-        # Context must be sadis
-        order = store.get_vowel_order_of(context)
-        if order != 5:
-            return False
-        base_key = store.get_key_for_sadis(context)
-        if base_key is None:
-            return False
-        return (base_key, key) in self.DIGRAM_MAP
-    
+        # Case 1: Ge'ez sadis context (e.g. ስ + h)
+        if store.is_geez_char(context):
+            order = store.get_vowel_order_of(context)
+            if order != 5:
+                return False
+            base_key = store.get_key_for_sadis(context)
+            return base_key is not None and (base_key, key) in self.DIGRAM_MAP
+        # Case 2: Latin pending context (e.g. 'c' + h)
+        return (context, key) in self.DIGRAM_MAP
+
     def apply(self, context: str, key: str, store: CharacterStore) -> CompositionAction:
-        base_key = store.get_key_for_sadis(context)
+        if store.is_geez_char(context):
+            base_key = store.get_key_for_sadis(context)
+            backspaces = 1  # replace the intermediate Ge'ez character
+        else:
+            base_key = context  # Latin pending char
+            backspaces = 0  # nothing was output for it
         digram_key = self.DIGRAM_MAP[(base_key, key)]
         sadis = store.get_sadis_for_key(digram_key)
         if sadis is not None:
-            return CompositionAction(output=sadis, backspaces=1, new_context=sadis)
+            return CompositionAction(output=sadis, backspaces=backspaces, new_context=sadis)
         return CompositionAction(output=key, backspaces=0, new_context="")
 
 # %% ../nbs/01_composition.ipynb 14
+class PendingConsonantRule(CompositionRule):
+    """First key of a digram with no single-key family: suppress output, store key as context.
+
+    'c' has no family of its own — only the first half of 'ch'.
+    Pressing 'c' produces no visible output but sets context to 'c' so
+    DigramSecondKeyRule can complete it when 'h' follows.
+    If followed by a non-completing key, 'c' is silently dropped.
+    """
+
+    PENDING_KEYS = {'c'}
+
+    @property
+    def priority(self) -> int: return 35
+
+    def matches(self, context: str, key: str, store: CharacterStore) -> bool:
+        return key in self.PENDING_KEYS
+
+    def apply(self, context: str, key: str, store: CharacterStore) -> CompositionAction:
+        return CompositionAction(output="", backspaces=0, new_context=key)
+
+# %% ../nbs/01_composition.ipynb 15
 class ConsonantRule(CompositionRule):
     """Bare consonant key -> sadis form: e.g., 'h' -> ህ.
-    
+
     When a consonant key is pressed (with no composable context),
     immediately output its sadis (6th order) form.
-    
-    Special case: 'c' is treated as 'ch' (outputs ች directly).
+    Note: 'c' is NOT here — it is handled by PendingConsonantRule + DigramSecondKeyRule.
     """
-    
-    # Maps single keys to base_key in the store
+
     CONSONANT_MAP = {
         'h': 'h', 'l': 'l', 'm': 'm', 'r': 'r',
         's': 's', 'q': 'q', 'b': 'b', 'v': 'v',
-        't': 't', 'c': 'ch',  # 'c' alone = ch
-        'n': 'n', 'k': 'k',
+        't': 't', 'n': 'n', 'k': 'k',
         'w': 'w', 'z': 'z', 'y': 'y',
         'd': 'd', 'j': 'j', 'g': 'g',
-        'f': 'f', 'p': 'p',
-        'x': 'x',
+        'f': 'f', 'p': 'p', 'x': 'x',
     }
-    
+
     @property
     def priority(self) -> int: return 30
-    
+
     def matches(self, context: str, key: str, store: CharacterStore) -> bool:
         return key in self.CONSONANT_MAP
-    
+
     def apply(self, context: str, key: str, store: CharacterStore) -> CompositionAction:
         base_key = self.CONSONANT_MAP[key]
         sadis = store.get_sadis_for_key(base_key)
@@ -282,7 +310,7 @@ class ConsonantRule(CompositionRule):
             return CompositionAction(output=sadis, backspaces=0, new_context=sadis)
         return CompositionAction(output=key, backspaces=0, new_context="")
 
-# %% ../nbs/01_composition.ipynb 15
+# %% ../nbs/01_composition.ipynb 16
 class PunctuationRule(CompositionRule):
     """Circular punctuation cycling: ':' -> '፡' -> '።' -> ':' -> ...
     
@@ -333,35 +361,47 @@ class PunctuationRule(CompositionRule):
             return CompositionAction(output=next_char, backspaces=0, new_context=next_char)
         return CompositionAction(output=key, backspaces=0, new_context="")
 
-# %% ../nbs/01_composition.ipynb 16
+# %% ../nbs/01_composition.ipynb 17
 class LoneVowelRule(CompositionRule):
-    """Lone vowel when no consonant context: 'e' -> እ, 'a' -> አ, etc.
-    
-    When the context is empty (no previous Ge'ez character), vowel keys
-    produce lone vowel characters from the vowel family.
+    """Lone vowel when no consonant context: 'a' -> አ, 'aa' -> ዐ, 'e' -> እ, etc.
+
+    Also handles the ayin family: typing 'a' twice gives ዐ (ayin sadis).
     """
-    
-    # Maps vowel keys to vowel family indices
+
+    # Maps vowel keys to vowel family (_v) indices
     VOWEL_KEY_TO_INDEX = {
-        'e': 5,  # እ (sadis) - default lone vowel for 'e'
+        'e': 5,  # እ (sadis)
         'u': 1,  # ኡ (kaeb)
         'i': 2,  # ኢ (salis)
-        'a': 3,  # ኣ (rabe)  
+        'a': 0,  # አ (geez) — changed from rabe(3) so 'a' gives the base aleph
         'o': 6,  # ኦ (sabe)
     }
-    
+
+    # The lone vowel geez form that triggers ayin on repeat
+    AYIN_TRIGGER = 'አ'
+
     @property
     def priority(self) -> int: return 20
-    
+
     def matches(self, context: str, key: str, store: CharacterStore) -> bool:
+        # 'aa' -> ዐ: context is አ and key is 'a'
+        if key == 'a' and context == self.AYIN_TRIGGER:
+            return True
         if key not in self.VOWEL_KEY_TO_INDEX:
             return False
-        # Only match when context is empty or non-composable
+        # Only match when context is empty or non-Ge'ez
         if context and store.is_geez_char(context):
             return False
         return True
-    
+
     def apply(self, context: str, key: str, store: CharacterStore) -> CompositionAction:
+        # 'aa' -> ዐ (ayin sadis)
+        if key == 'a' and context == self.AYIN_TRIGGER:
+            ayin_family = store.get_family('_a')
+            ayin_sadis = ayin_family.get_character_by_index(0) if ayin_family else None  # geez form (ዐ)
+            if ayin_sadis:
+                return CompositionAction(output=ayin_sadis, backspaces=1, new_context=ayin_sadis)
+        # Normal lone vowel
         index = self.VOWEL_KEY_TO_INDEX[key]
         vowel_family = store.get_family('_v')
         if vowel_family:
@@ -372,22 +412,19 @@ class LoneVowelRule(CompositionRule):
 
 # %% ../nbs/01_composition.ipynb 18
 class ContextEngine:
-    """Context-driven composition engine (replaces SyllableComposer).
-    
+    """Context-driven composition engine.
+
     Processes keystrokes using Keyman-style context rules. Each keystroke
     produces immediate output; subsequent keystrokes may replace the previous
     character via backspace.
-    
-    Args:
-        store: CharacterStore with all character families loaded
     """
-    
+
     def __init__(self, store: CharacterStore):
         self.store = store
-        self.context = ""   # Last output character
+        self.context = ""
         self.rules: List[CompositionRule] = []
         self._build_rules()
-    
+
     def _build_rules(self):
         """Build and sort rules by priority (highest first)."""
         self.rules = [
@@ -397,32 +434,23 @@ class ContextEngine:
             FifthOrderRule(),
             VowelRule(),
             DigramSecondKeyRule(),
+            PendingConsonantRule(),
             ConsonantRule(),
             PunctuationRule(),
             LoneVowelRule(),
         ]
         self.rules.sort(key=lambda r: r.priority, reverse=True)
-    
+
     def process_key(self, key: str) -> CompositionAction:
-        """Process a single keystroke. Returns action (output + backspaces).
-        
-        Args:
-            key: The key pressed (single character)
-            
-        Returns:
-            CompositionAction with output, backspaces, and new context
-        """
-        # Try rules in priority order
+        """Process a single keystroke and return the resulting action."""
         for rule in self.rules:
             if rule.matches(self.context, key, self.store):
                 action = rule.apply(self.context, key, self.store)
                 self.context = action.new_context
                 return action
-        
-        # No rule matched - pass key through unchanged
         self.context = ""
         return CompositionAction(output=key, backspaces=0, new_context="")
-    
+
     def reset(self):
         """Reset engine state (clear context)."""
         self.context = ""
