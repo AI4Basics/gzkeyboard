@@ -16,7 +16,7 @@ import argparse
 import time
 from pathlib import Path
 
-from .core import CharacterStore
+from .core import CharacterStore, AmharicCharacterStore
 from .composition import ContextEngine, CompositionAction
 
 # %% ../nbs/02_system_integration.ipynb 5
@@ -135,6 +135,12 @@ class StatusIndicator:
 # %% ../nbs/02_system_integration.ipynb 11
 CONTEXT_TIMEOUT = 0.5  # seconds: reset context if this much time passes between keys
 
+def _store_for_mode(mode: 'InputMode') -> CharacterStore:
+    """Return the appropriate CharacterStore for the given input mode."""
+    if mode == InputMode.AMHARIC:
+        return AmharicCharacterStore()
+    return CharacterStore()  # Tigrinya uses the full store
+
 class SystemInputHandler:
     """Handles system-wide keyboard input for the Geez keyboard.
     
@@ -153,13 +159,13 @@ class SystemInputHandler:
         self.config = config or KeyboardConfig()
         
         # Initialize components
-        self.character_store = CharacterStore()
+        self.current_mode = self.config.default_mode
+        self.character_store = _store_for_mode(self.current_mode)
         self.engine = ContextEngine(self.character_store)
         self.status = StatusIndicator(self.config)
         self.hotkey_manager = HotkeyManager(self.config)
         
         # State
-        self.current_mode = self.config.default_mode
         self.active = True
         self.keyboard_hook_active = False
         self._last_key_time = 0.0   # for context timeout
@@ -177,10 +183,11 @@ class SystemInputHandler:
         self.hotkey_manager.register_callback('cancel_buffer', self.reset_engine)
     
     def switch_mode(self, mode: InputMode):
-        """Switch to a different input mode."""
+        """Switch to a different input mode, reinitialising the store and engine."""
         self.current_mode = mode
+        self.character_store = _store_for_mode(mode)
+        self.engine = ContextEngine(self.character_store)
         self.status.update_mode(mode)
-        self.engine.reset()
     
     def toggle_active(self):
         """Toggle the keyboard active/inactive state."""
@@ -273,12 +280,6 @@ class SystemInputHandler:
             self.hotkey_manager.setup_hotkeys()
             return True
             
-        except ImportError as e:
-            if "root" in str(e).lower():
-                self.status.show_status("Root access required. Run with: sudo $(which python) -m gzkeyboard.main")
-            else:
-                self.status.show_status(f"Keyboard library error: {e}")
-            return False
         except Exception as e:
             self.status.show_status(f"Error setting up keyboard hook: {type(e).__name__}: {e}")
             import traceback

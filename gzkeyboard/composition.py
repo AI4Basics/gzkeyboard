@@ -220,22 +220,31 @@ class DigramSecondKeyRule(CompositionRule):
     """
 
     DIGRAM_MAP = {
-        ('s', 'h'):  'sh',
-        ('z', 'h'):  'zh',
-        ('t', 's'):  'ts',
-        ('g', 'n'):  'gn',
-        ('c', 'h'):  'ch',   # 'c' is pending (no output), 'h' completes it
-        ('h', 'h'):  'hh',   # hh family (ሐ)
-        ('q', 'h'):  'qh',   # qh family (ቐ)
+        ('s',  'h'):  'sh',   # sh  family (ሸ)
+        ('z',  'h'):  'zh',   # zh  family (ዠ)
+        ('t',  's'):  'ts',   # ts  family (ጸ)
+        ('ts', 's'):  'tss',  # tss family (ፀ) — t+s+s → emphatic
+        ('g',  'n'):  'gn',   # gn  family (ኘ)
+        ('c',  'h'):  'ch',   # ch  family (ቸ) — 'c' is pending
+        ('h',  'h'):  'hh',   # hh  family (ሐ)
+        ('q',  'h'):  'qh',   # qh  family (ቐ)
+        ('t',  't'):  'tt',   # tt  family (ጠ)
+        ('ch', 'h'):  'chh',  # chh family (ጨ)
+        ('p',  'p'):  'pp',   # pp  family (ጰ)
+        # Labiovelars: consonant + 'w' -> labiovelar sadis, then vowel modifies normally
+        ('h',  'w'):  'hw',   # hw  family (ሀ labiovelar)
+        ('k',  'w'):  'kw',   # kw  family (ከ labiovelar)
+        ('q',  'w'):  'qw',   # qw  family (ቀ labiovelar)
+        ('g',  'w'):  'gw',   # gw  family (ገ labiovelar)
     }
 
     @property
-    def priority(self) -> int: return 95  # above DoubleStrikeRule(90) so hh beats the alternate cycle
+    def priority(self) -> int: return 95
 
     def matches(self, context: str, key: str, store: CharacterStore) -> bool:
         if not context:
             return False
-        # Case 1: Ge'ez sadis context (e.g. ስ + h)
+        # Case 1: Ge'ez sadis context
         if store.is_geez_char(context):
             order = store.get_vowel_order_of(context)
             if order != 5:
@@ -248,10 +257,10 @@ class DigramSecondKeyRule(CompositionRule):
     def apply(self, context: str, key: str, store: CharacterStore) -> CompositionAction:
         if store.is_geez_char(context):
             base_key = store.get_key_for_sadis(context)
-            backspaces = 1  # replace the intermediate Ge'ez character
+            backspaces = 1
         else:
-            base_key = context  # Latin pending char
-            backspaces = 0  # nothing was output for it
+            base_key = context
+            backspaces = 0
         digram_key = self.DIGRAM_MAP[(base_key, key)]
         sadis = store.get_sadis_for_key(digram_key)
         if sadis is not None:
@@ -363,52 +372,77 @@ class PunctuationRule(CompositionRule):
 
 # %% ../nbs/01_composition.ipynb 17
 class LoneVowelRule(CompositionRule):
-    """Lone vowel when no consonant context: 'a' -> አ, 'aa' -> ዐ, 'e' -> እ, etc.
+    """Lone vowel sequences when no consonant context.
 
-    Also handles the ayin family: typing 'a' twice gives ዐ (ayin sadis).
+    Handles the _v (vowel/aleph) and _a (ayin) families through multi-key sequences:
+
+    Vowel family (_v):
+      a  → አ    u  → ኡ    i  → ኢ    o  → ኦ
+      ah → ኣ    ei → ኤ    eh → እ
+
+    Ayin family (_a):
+      aa  → ዐ    uu → ዑ    ii → ዒ    oo → ዖ
+      aah → ዓ   eei → ዔ   eeh → ዕ
+
+    'e' is pending (no immediate output) until followed by 'i', 'h', or 'e'.
+    Priority is above ConsonantRule (30) so that lone-vowel extensions
+    (e.g., context=አ + 'h' → ኣ) are caught before ConsonantRule fires.
     """
 
-    # Maps vowel keys to vowel family (_v) indices
-    VOWEL_KEY_TO_INDEX = {
-        'e': 5,  # እ (sadis)
-        'u': 1,  # ኡ (kaeb)
-        'i': 2,  # ኢ (salis)
-        'a': 0,  # አ (geez) — changed from rabe(3) so 'a' gives the base aleph
-        'o': 6,  # ኦ (sabe)
+    # Initial: key → (output_char, new_context)
+    # 'e' is pending — produces no output, stores 'e' as context
+    INITIAL_MAP = {
+        'a': ('አ', 'አ'),
+        'u': ('ኡ', 'ኡ'),
+        'i': ('ኢ', 'ኢ'),
+        'o': ('ኦ', 'ኦ'),
+        'e': ('',  'e'),
     }
 
-    # The lone vowel geez form that triggers ayin on repeat
-    AYIN_TRIGGER = 'አ'
+    # Extensions: (context, key) → (output, backspaces, new_context)
+    EXTENSION_MAP = {
+        # Vowel family extensions
+        ('አ', 'a'): ('ዐ', 1, 'ዐ'),    # aa  → ዐ  (a→አ, then a→ዐ)
+        ('አ', 'h'): ('ኣ', 1, 'ኣ'),    # ah  → ኣ
+        # Ayin family from ዐ: the 3rd key of 'aah' is 'h'
+        ('ዐ', 'h'): ('ዓ', 1, 'ዓ'),    # aah → ዓ  (a→አ, a→ዐ, h→ዓ)
+        # Double vowels → ayin family
+        ('ኡ', 'u'): ('ዑ', 1, 'ዑ'),    # uu  → ዑ
+        ('ኢ', 'i'): ('ዒ', 1, 'ዒ'),    # ii  → ዒ
+        ('ኦ', 'o'): ('ዖ', 1, 'ዖ'),    # oo  → ዖ
+        # 'e' pending sequences
+        ('e',  'i'): ('ኤ', 0, 'ኤ'),   # ei  → ኤ
+        ('e',  'h'): ('እ', 0, 'እ'),   # eh  → እ
+        ('e',  'e'): ('',  0, 'ee'),   # ee  → pending 'ee'
+        # 'ee' pending sequences
+        ('ee', 'i'): ('ዔ', 0, 'ዔ'),   # eei → ዔ
+        ('ee', 'h'): ('ዕ', 0, 'ዕ'),   # eeh → ዕ
+    }
+
+    # Latin pending contexts — block re-entry as initial
+    PENDING_CONTEXTS = {'e', 'ee'}
 
     @property
-    def priority(self) -> int: return 20
+    def priority(self) -> int: return 32
 
     def matches(self, context: str, key: str, store: CharacterStore) -> bool:
-        # 'aa' -> ዐ: context is አ and key is 'a'
-        if key == 'a' and context == self.AYIN_TRIGGER:
+        # Extension: known (context, key) pair
+        if (context, key) in self.EXTENSION_MAP:
             return True
-        if key not in self.VOWEL_KEY_TO_INDEX:
-            return False
-        # Only match when context is empty or non-Ge'ez
-        if context and store.is_geez_char(context):
-            return False
-        return True
+        # Initial: key is a lone-vowel starter, not inside a pending or Ge'ez context
+        if key in self.INITIAL_MAP:
+            if not store.is_geez_char(context) and context not in self.PENDING_CONTEXTS:
+                return True
+        return False
 
     def apply(self, context: str, key: str, store: CharacterStore) -> CompositionAction:
-        # 'aa' -> ዐ (ayin sadis)
-        if key == 'a' and context == self.AYIN_TRIGGER:
-            ayin_family = store.get_family('_a')
-            ayin_sadis = ayin_family.get_character_by_index(0) if ayin_family else None  # geez form (ዐ)
-            if ayin_sadis:
-                return CompositionAction(output=ayin_sadis, backspaces=1, new_context=ayin_sadis)
-        # Normal lone vowel
-        index = self.VOWEL_KEY_TO_INDEX[key]
-        vowel_family = store.get_family('_v')
-        if vowel_family:
-            char = vowel_family.get_character_by_index(index)
-            if char is not None:
-                return CompositionAction(output=char, backspaces=0, new_context=char)
-        return CompositionAction(output=key, backspaces=0, new_context="")
+        # Extension case
+        if (context, key) in self.EXTENSION_MAP:
+            output, backspaces, new_ctx = self.EXTENSION_MAP[(context, key)]
+            return CompositionAction(output=output, backspaces=backspaces, new_context=new_ctx)
+        # Initial case
+        output, new_ctx = self.INITIAL_MAP[key]
+        return CompositionAction(output=output, backspaces=0, new_context=new_ctx)
 
 # %% ../nbs/01_composition.ipynb 18
 class ContextEngine:
