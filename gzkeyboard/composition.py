@@ -217,9 +217,12 @@ class DigramSecondKeyRule(CompositionRule):
 
     Priority is set above DoubleStrikeRule so that 'hh' maps to ሐ (hh family)
     rather than cycling to the DoubleStrike alternate ኅ.
+
+    The digram_map parameter accepts an instance-specific map (from MappingsConfig).
+    If omitted, the built-in default map is used.
     """
 
-    DIGRAM_MAP = {
+    _DEFAULT_DIGRAM_MAP: Dict[Tuple[str, str], str] = {
         ('s',  'h'):  'sh',   # sh  family (ሸ)
         ('z',  'h'):  'zh',   # zh  family (ዠ)
         ('t',  's'):  'ts',   # ts  family (ጸ)
@@ -228,6 +231,7 @@ class DigramSecondKeyRule(CompositionRule):
         ('c',  'h'):  'ch',   # ch  family (ቸ) — 'c' is pending
         ('h',  'h'):  'hh',   # hh  family (ሐ)
         ('q',  'h'):  'qh',   # qh  family (ቐ)
+        ('k',  'h'):  'kh',   # kh  family (ኸ)
         ('t',  't'):  'tt',   # tt  family (ጠ)
         ('ch', 'h'):  'chh',  # chh family (ጨ)
         ('p',  'p'):  'pp',   # pp  family (ጰ)
@@ -237,6 +241,9 @@ class DigramSecondKeyRule(CompositionRule):
         ('q',  'w'):  'qw',   # qw  family (ቀ labiovelar)
         ('g',  'w'):  'gw',   # gw  family (ገ labiovelar)
     }
+
+    def __init__(self, digram_map: Optional[Dict[Tuple[str, str], str]] = None):
+        self._digram_map = digram_map if digram_map is not None else self._DEFAULT_DIGRAM_MAP
 
     @property
     def priority(self) -> int: return 95
@@ -250,9 +257,9 @@ class DigramSecondKeyRule(CompositionRule):
             if order != 5:
                 return False
             base_key = store.get_key_for_sadis(context)
-            return base_key is not None and (base_key, key) in self.DIGRAM_MAP
+            return base_key is not None and (base_key, key) in self._digram_map
         # Case 2: Latin pending context (e.g. 'c' + h)
-        return (context, key) in self.DIGRAM_MAP
+        return (context, key) in self._digram_map
 
     def apply(self, context: str, key: str, store: CharacterStore) -> CompositionAction:
         if store.is_geez_char(context):
@@ -261,7 +268,7 @@ class DigramSecondKeyRule(CompositionRule):
         else:
             base_key = context
             backspaces = 0
-        digram_key = self.DIGRAM_MAP[(base_key, key)]
+        digram_key = self._digram_map[(base_key, key)]
         sadis = store.get_sadis_for_key(digram_key)
         if sadis is not None:
             return CompositionAction(output=sadis, backspaces=backspaces, new_context=sadis)
@@ -271,19 +278,25 @@ class DigramSecondKeyRule(CompositionRule):
 class PendingConsonantRule(CompositionRule):
     """First key of a digram with no single-key family: suppress output, store key as context.
 
-    'c' has no family of its own — only the first half of 'ch'.
+    'c' has no family of its own — only the first half of 'ch'/'chh'.
     Pressing 'c' produces no visible output but sets context to 'c' so
     DigramSecondKeyRule can complete it when 'h' follows.
     If followed by a non-completing key, 'c' is silently dropped.
+
+    The pending_keys set is injected by ContextEngine from MappingsConfig so that
+    user-defined mappings are respected.
     """
 
-    PENDING_KEYS = {'c'}
+    _DEFAULT_PENDING: Set[str] = {'c'}
+
+    def __init__(self, pending_keys: Optional[Set[str]] = None):
+        self._pending_keys = pending_keys if pending_keys is not None else self._DEFAULT_PENDING
 
     @property
     def priority(self) -> int: return 35
 
     def matches(self, context: str, key: str, store: CharacterStore) -> bool:
-        return key in self.PENDING_KEYS
+        return key in self._pending_keys
 
     def apply(self, context: str, key: str, store: CharacterStore) -> CompositionAction:
         return CompositionAction(output="", backspaces=0, new_context=key)
@@ -295,25 +308,30 @@ class ConsonantRule(CompositionRule):
     When a consonant key is pressed (with no composable context),
     immediately output its sadis (6th order) form.
     Note: 'c' is NOT here — it is handled by PendingConsonantRule + DigramSecondKeyRule.
+
+    The consonant_map is injected by ContextEngine from MappingsConfig so that
+    user-defined mappings are respected.
     """
 
-    CONSONANT_MAP = {
+    _DEFAULT_CONSONANT_MAP: Dict[str, str] = {
         'h': 'h', 'l': 'l', 'm': 'm', 'r': 'r',
         's': 's', 'q': 'q', 'b': 'b', 'v': 'v',
-        't': 't', 'n': 'n', 'k': 'k',
-        'w': 'w', 'z': 'z', 'y': 'y',
-        'd': 'd', 'j': 'j', 'g': 'g',
-        'f': 'f', 'p': 'p', 'x': 'x',
+        't': 't', 'n': 'n', 'k': 'k', 'w': 'w',
+        'z': 'z', 'y': 'y', 'd': 'd', 'j': 'j',
+        'g': 'g', 'f': 'f', 'p': 'p', 'x': 'x',
     }
+
+    def __init__(self, consonant_map: Optional[Dict[str, str]] = None):
+        self._consonant_map = consonant_map if consonant_map is not None else self._DEFAULT_CONSONANT_MAP
 
     @property
     def priority(self) -> int: return 30
 
     def matches(self, context: str, key: str, store: CharacterStore) -> bool:
-        return key in self.CONSONANT_MAP
+        return key in self._consonant_map
 
     def apply(self, context: str, key: str, store: CharacterStore) -> CompositionAction:
-        base_key = self.CONSONANT_MAP[key]
+        base_key = self._consonant_map[key]
         sadis = store.get_sadis_for_key(base_key)
         if sadis is not None:
             return CompositionAction(output=sadis, backspaces=0, new_context=sadis)
@@ -451,29 +469,49 @@ class ContextEngine:
     Processes keystrokes using Keyman-style context rules. Each keystroke
     produces immediate output; subsequent keystrokes may replace the previous
     character via backspace.
+
+    Pass a `MappingsConfig` instance to use custom key sequences; omit it (or
+    pass ``None``) to use the factory defaults.
     """
 
-    def __init__(self, store: CharacterStore):
-        self.store = store
-        self.context = ""
+    def __init__(self, store: CharacterStore, mappings=None):
+        self.store    = store
+        self.mappings = mappings  # MappingsConfig or None → defaults
+        self.context  = ""
         self.rules: List[CompositionRule] = []
         self._build_rules()
 
     def _build_rules(self):
-        """Build and sort rules by priority (highest first)."""
+        """Build and sort rules by priority (highest first).
+
+        Rules that accept custom maps (ConsonantRule, DigramSecondKeyRule,
+        PendingConsonantRule) are constructed from the active MappingsConfig.
+        """
+        from gzkeyboard.core import MappingsConfig
+        cfg           = self.mappings or MappingsConfig.default()
+        consonant_map = cfg.get_consonant_map()
+        digram_map    = cfg.get_digram_map()
+        pending_keys  = cfg.get_pending_keys()
+
         self.rules = [
             SeparatorRule(),
             DoubleStrikeRule(),
             LabiovelarRule(),
             FifthOrderRule(),
             VowelRule(),
-            DigramSecondKeyRule(),
-            PendingConsonantRule(),
-            ConsonantRule(),
+            DigramSecondKeyRule(digram_map),
+            PendingConsonantRule(pending_keys),
+            ConsonantRule(consonant_map),
             PunctuationRule(),
             LoneVowelRule(),
         ]
         self.rules.sort(key=lambda r: r.priority, reverse=True)
+
+    def apply_mappings(self, mappings):
+        """Rebuild rules from a new MappingsConfig (called after user edits settings)."""
+        self.mappings = mappings
+        self._build_rules()
+        self.reset()
 
     def process_key(self, key: str) -> CompositionAction:
         """Process a single keystroke and return the resulting action."""

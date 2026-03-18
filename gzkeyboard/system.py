@@ -16,7 +16,7 @@ import argparse
 import time
 from pathlib import Path
 
-from .core import CharacterStore, AmharicCharacterStore
+from .core import CharacterStore, AmharicCharacterStore, MappingsConfig
 from .composition import ContextEngine, CompositionAction
 
 # %% ../nbs/02_system_integration.ipynb 5
@@ -154,14 +154,22 @@ class SystemInputHandler:
       by the hook to prevent re-entrancy corruption.
     """
     
-    def __init__(self, config: Optional[KeyboardConfig] = None):
-        """Initialize the input handler with configuration."""
+    def __init__(self, config: Optional[KeyboardConfig] = None,
+                 mappings: Optional[MappingsConfig] = None):
+        """Initialize the input handler with configuration.
+        
+        Args:
+            config: Keyboard configuration (hotkeys, mode, etc.)
+            mappings: Key sequence mappings. Loads from ~/.gzkeyboard/mappings.json
+                      if omitted, falling back to factory defaults.
+        """
         self.config = config or KeyboardConfig()
+        self.mappings = mappings or MappingsConfig.load()
         
         # Initialize components
         self.current_mode = self.config.default_mode
         self.character_store = _store_for_mode(self.current_mode)
-        self.engine = ContextEngine(self.character_store)
+        self.engine = ContextEngine(self.character_store, self.mappings)
         self.status = StatusIndicator(self.config)
         self.hotkey_manager = HotkeyManager(self.config)
         
@@ -186,9 +194,18 @@ class SystemInputHandler:
         """Switch to a different input mode, reinitialising the store and engine."""
         self.current_mode = mode
         self.character_store = _store_for_mode(mode)
-        self.engine = ContextEngine(self.character_store)
+        self.engine = ContextEngine(self.character_store, self.mappings)
         self.status.update_mode(mode)
     
+    def apply_mappings(self, mappings: MappingsConfig):
+        """Apply new key mappings and persist them to disk.
+        
+        Called by the Settings GUI after the user saves changes.
+        """
+        self.mappings = mappings
+        self.mappings.save()
+        self.engine.apply_mappings(mappings)
+
     def toggle_active(self):
         """Toggle the keyboard active/inactive state."""
         self.active = not self.active
